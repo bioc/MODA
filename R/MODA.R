@@ -74,6 +74,8 @@ PartitionDensity <- function(ADJ, PartitionSet){
 PartitionModularity <- function(ADJ, PartitionSet){
     labels <- unique(PartitionSet)
     numP <- length(labels)
+    m = sum(ADJ)
+    K = colSums(ADJ)
     pModularity <- 0
     for (i in seq_len(numP)){
         idx = which(PartitionSet == labels[i])
@@ -82,15 +84,15 @@ PartitionModularity <- function(ADJ, PartitionSet){
             pModularity <- pModularity + 0
         }else{
             Aq = ADJ[idx,idx]
-            sum = sum(Aq)
-            nrow = dim(Aq)[1]
-            pModularity <- pModularity + sum * (sum - nrow) / (nrow * (nrow - 1))
+            deg = K[idx]
+            pModularity = pModularity + sum(Aq)- sum(deg*deg)/m
+            
         }
-        
     }
-    pModularity <- pModularity*2/sum(ADJ)
+    pModularity <- pModularity/m
     pModularity
 }
+
 
 #' Illustration of Modules detection
 #' 
@@ -148,7 +150,7 @@ WeightedModulePartitionDensity <- function(datExpr,foldername,indicatename,
     for (i in 1:NumCutHeights) {
         #groups <- cutree(hierADJ, h = hierADJ$height[i]) # cut tree into 5
         groups <- cutree(hierADJ, h = cutHeights[i])
-        if (cutmethod == 'density'){
+        if (cutmethod == 'Density'){
             pDensity[i] <- PartitionDensity(ADJ1,groups)
         }else{
             pDensity[i] <- PartitionModularity(ADJ1,groups)
@@ -171,8 +173,9 @@ WeightedModulePartitionDensity <- function(datExpr,foldername,indicatename,
     intModules = table(dynamicColors)
      
     #######Visualization#############
-    pdf(paste(foldername,"/Partitions_",indicatename,".pdf",sep=""),width = 11, 
-        height = 8)
+    #pdf(paste(foldername,"/Partitions_",indicatename,".pdf",sep=""),width = 11, 
+    #    height = 8)
+    png(paste(foldername,"/Partitions_",indicatename,".png",sep=""))
     marAll = c(1, 5, 3, 1)
     layout(matrix(c(1,2,3,0), 2, 2, byrow = TRUE), widths=c(0.8,0.2),
            heights=c(0.8,0.2))
@@ -308,11 +311,13 @@ CompareAllNets <-function(ResultFolder,intModules,speciesName,
                     intconditionModules[i],paste('/DenseModuleGene_',
                     speciesName,sep=''),paste('/DenseModuleGene_',
                     conditionNames[i],sep=''))
-        dir.create(paste(ResultFolder,'/',conditionNames[i],sep=''))
+        dir.create(paste(ResultFolder,'/',conditionNames[i],sep=''), showWarnings = FALSE)
         fileprefix <- paste(ResultFolder,'/',conditionNames[i],'/',sep='')
 
-        pdf(paste(fileprefix,'module_overlap_remove',conditionNames[i],
-                  '.pdf',sep=''),width = 10, height = 8)
+        #pdf(paste(fileprefix,'module_overlap_remove',conditionNames[i],
+        #          '.pdf',sep=''),width = 10, height = 8)
+        png(paste(fileprefix,'module_overlap_remove',conditionNames[i],
+                  '.png',sep=''))
         plot(1:intModules,rowSums(ArrayGroup1),xlim = c(0,(intModules + 1)),
              ylim = c(0,max(rowSums(ArrayGroup1)) + 0.1),
              xlab="Module ID",ylab = 'RowSums of jaccard matrix', 
