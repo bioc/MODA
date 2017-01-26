@@ -94,7 +94,7 @@ PartitionModularity <- function(ADJ, PartitionSet){
 }
 
 
-#' Illustration of Modules detection
+#' Modules detection by hierarchical clustering
 #' 
 #' Module detection based on the optimal cutting height of dendrogram, which is 
 #' selected to make the average density or modularity of resulting partition
@@ -128,12 +128,14 @@ PartitionModularity <- function(ADJ, PartitionSet){
 #' indicator2 = 'Y'      # indicator for data profile 2
 #' specificTheta = 0.1 #threshold to define condition specific modules
 #' conservedTheta = 0.1#threshold to define conserved modules
-#' intModules1 <- WeightedModulePartitionDensity(datExpr1,ResultFolder,
+#' intModules1 <- WeightedModulePartitionHierarchical(datExpr1,ResultFolder,
 #' indicator1,CuttingCriterion) 
+#' #mymodule <- getPartition(ResultFolder)
+#' #randIndex(table(mymodule,truemodule),adjust=F)
 
 #' @export
 #' 
-WeightedModulePartitionDensity <- function(datExpr,foldername,indicatename,
+WeightedModulePartitionHierarchical <- function(datExpr,foldername,indicatename,
                         cutmethod=c('Density','Modularity'), power=10){
     dir.create(file.path('./', foldername), showWarnings = FALSE)
     
@@ -202,11 +204,226 @@ WeightedModulePartitionDensity <- function(datExpr,foldername,indicatename,
         DenseGenes = colnames(datExpr)[idx]
         densegenefile <- paste(foldername,"/DenseModuleGene_",
                                indicatename,"_",J,".txt",sep="")
+        write.table(idx,file = paste(foldername,'/DenseModuleGeneID_',indicatename,'_',J,'.txt',sep=''),
+                    quote = FALSE, row.names = FALSE, col.names = FALSE)
         write.table(DenseGenes,densegenefile,sep = "\n",col.names = FALSE,
                     row.names = FALSE,quote = FALSE)
     }
     
     return (length(intModules))
+}
+
+#' Modules detection by spectral clustering
+#' 
+#' Module detection based on the spectral clustering algorithm, which mainly
+#' solve the eigendecomposition on Laplacian matrix
+#'
+#' @param datExpr gene expression profile, rows are samples and columns genes
+#' @param foldername where to store the clusters
+#' @param indicatename normally a specific tag of condition
+#' @param GeneNames normally the gene official names to replace the colnames of datExpr
+#' @param power the power parameter of WGCNA, W_{ij}=|cor(x_i,x_j)|^power
+#' @param nn the number of nearest neighbor, used to construct the affinity matrix
+#' @param k the number of clusters(modules)
+#'
+#' @return None
+#' 
+#' @references Von Luxburg, Ulrike. "A tutorial on spectral clustering." 
+#' Statistics and computing 17.4 (2007): 395-416.
+#' 
+#' @author Dong Li, \email{dxl466@cs.bham.ac.uk}
+#' @keywords cutting dendrogram
+#' 
+#'
+#' @import igraph
+#' @import cluster
+#' @examples
+#' data(synthetic)
+#' ResultFolder <- 'ForSynthetic' # where middle files are stored
+#' indicator <- 'X'     # indicator for data profile 1
+#' GeneNames <- colnames(datExpr1)
+#' WeightedModulePartitionSpectral(datExpr1,ResultFolder,indicator,
+#' GeneNames,k=5)
+#' truemodule <- c(rep(1,100),rep(2,100),rep(3,100),rep(4,100),rep(5,100))
+#' #mymodule <- getPartition(ResultFolder)
+#' #randIndex(table(mymodule,truemodule),adjust=F)
+#' @export
+#' 
+WeightedModulePartitionSpectral <- function(datExpr, foldername, indicatename, 
+                                    GeneNames, power=6, nn=10, k=2){
+    dir.create(file.path('./', foldername), showWarnings = FALSE)
+    ADJ1=abs(cor(datExpr,use="p"))^power
+ 
+    W = TOMsimilarity(ADJ1)   # similarity matrix
+    A = make.affinity(W,nn)
+    d <- apply(A, 1, sum)
+    L <- diag(d)-A                        # unnormalized version
+    #bottleneck
+    L <- diag(d^-0.5)%*%L%*% diag(d^-0.5) # normalized version
+    evL <- eigen(L,symmetric=TRUE)  # evL$values is decreasing sorted when symmetric=TRUE
+    #bottleneck
+    Z <- evL$vectors[,(ncol(evL$vectors)-k+1):ncol(evL$vectors)]
+    spc <- pam(Z,k)
+    colorSpectralTom <- labels2colors(spc$cluster)
+    intModules = table(colorSpectralTom)
+    for(J in 1:length(intModules)){
+        idx <- which(colorSpectralTom == names(intModules)[J])
+        DenseGenes = GeneNames[idx]
+        densegenefile <- paste(foldername,"/DenseModuleGene_",
+                               indicatename,"_",J,".txt",sep="")
+        write.table(idx,file = paste(foldername,'/DenseModuleGeneID_',indicator,'_',J,'.txt',sep=''),
+                    quote = FALSE, row.names = FALSE, col.names = FALSE)
+        write.table(DenseGenes,densegenefile,sep = "\n",col.names = FALSE,
+                    row.names = FALSE,quote = FALSE)
+    }                                    
+}
+
+#' Modules detection by Louvain algorithm
+#' 
+#' Module detection based on the Louvain algorithm, which tries to maximize 
+#' overall modularity of resulting partition.
+#'
+#' @param datExpr gene expression profile, rows are samples and columns genes
+#' @param foldername where to store the clusters
+#' @param indicatename normally a specific tag of condition
+#' @param GeneNames normally the gene official names to replace the colnames of datExpr
+#' @param maxsize the maximal nodes allowed in one module
+#' @param minsize the minimal nodes allowed in one module
+#' @param power the power parameter of WGCNA, W_{ij}=|cor(x_i,x_j)|^power
+#' @param tao the threshold to cut the adjacency matrix
+#'
+#' @return The number of clusters
+#' 
+#' @references Blondel, Vincent D., et al. "Fast unfolding of communities in 
+#' large networks." Journal of statistical mechanics: theory and experiment 
+#' 2008.10 (2008): P10008.
+#' 
+#' @author Dong Li, \email{dxl466@cs.bham.ac.uk}
+#' @keywords cutting dendrogram
+#' 
+#'
+#' @import igraph
+#' @examples
+#' data(synthetic)
+#' ResultFolder <- 'ForSynthetic' # where middle files are stored
+#' indicator <- 'X'     # indicator for data profile 1
+#' GeneNames <- colnames(datExpr1)
+#' intModules1 <- WeightedModulePartitionLouvain(datExpr1,ResultFolder,indicator,GeneNames)
+#' truemodule <- c(rep(1,100),rep(2,100),rep(3,100),rep(4,100),rep(5,100))
+#' #mymodule <- getPartition(ResultFolder)
+#' #randIndex(table(mymodule,truemodule),adjust=F)
+#' @export
+#' 
+WeightedModulePartitionLouvain <- function(datExpr,foldername,indicatename,GeneNames,
+                                  maxsize=200, minsize=30, power=6, tao=0.2){
+    ADJ <- abs(cor(datExpr,use="p"))^power
+    #ADJ <- sparse.cor(datExpr)^power
+    ADJ[ADJ < tao] <- 0
+    g <- graph_from_adjacency_matrix(ADJ,mode='undirected',weighted=TRUE)
+    V(g)$name=1:length(V(g))
+    dir.create(foldername, showWarnings = FALSE)
+    tmfile <- paste(foldername,'tmp.txt',sep='')
+    recursiveigraph(g,tmfile,'louvain',maxsize, minsize)
+    if(!file.exists(tmfile)){
+        print('Not suitable for Louvain! Try another module identification method')
+        return (0)
+    }else
+    {
+        num <- modulesRank(foldername,indicatename,GeneNames)
+        return (num)
+    }
+}
+
+#' Modules detection by AMOUNTAIN algorithm
+#' 
+#' Module detection based on the AMOUNTAIN algorithm, which tries to find the  
+#' optimal module every time and use a modules extraction way
+#'
+#' @param datExpr gene expression profile, rows are samples and columns genes
+#' @param Nmodule the number of clusters(modules)
+#' @param foldername where to store the clusters
+#' @param indicatename normally a specific tag of condition
+#' @param GeneNames normally the gene official names to replace the colnames of datExpr
+#' @param maxsize the maximal nodes allowed in one module
+#' @param minsize the minimal nodes allowed in one module
+#' @param power the power parameter of WGCNA, W_{ij}=|cor(x_i,x_j)|^pwr
+#' @param tao the threshold to cut the adjacency matrix
+#' 
+#' @return None
+#' 
+#' @references Blondel, Vincent D., et al. "Fast unfolding of communities in 
+#' large networks." Journal of statistical mechanics: theory and experiment 
+#' 2008.10 (2008): P10008.
+#' 
+#' @author Dong Li, \email{dxl466@cs.bham.ac.uk}
+#' @keywords optimization
+#' 
+#' @import AMOUNTAIN
+#' @examples
+#' data(synthetic)
+#' ResultFolder <- 'ForSynthetic' # where middle files are stored
+#' GeneNames <- colnames(datExpr1)
+#' intModules1 <- WeightedModulePartitionAmoutain(datExpr1,5,ResultFolder,'X',
+#' GeneNames,maxsize=100,minsize=50)
+#' truemodule <- c(rep(1,100),rep(2,100),rep(3,100),rep(4,100),rep(5,100))
+#' #mymodule <- getPartition(ResultFolder)
+#' #randIndex(table(mymodule,truemodule),adjust=F)
+#' @export
+#' 
+WeightedModulePartitionAmoutain <- function(datExpr,Nmodule,foldername,indicatename,
+                        GeneNames, maxsize=200, minsize=3, power=6, tao=0.2){
+    W <- abs(cor(datExpr,use="p"))^power
+    W[W < tao] <- 0
+    N = dim(W)[1]
+    z <- rep(0,N)
+    idx <- 1
+    dir.create(foldername, showWarnings = FALSE)
+    idxname <- 1:N
+    saveAtomfile <- paste(foldername,'/AtomModule',sep='')
+    for (ii in 1:Nmodule) {
+        abegin = 0.01
+        aend = 0.9
+        for (i in 1:20) {
+            #x <- CGPFixSS(W,z,rep(1/N,N),a=(abegin+aend)/2,lambda=0,maxiter = 50)
+            x <- moduleIdentificationGPFixSS(W,z,rep(1/N,N),a=(abegin+aend)/2,
+                                             lambda=0,maxiter = 50)
+            predictedid <- which(x[[2]]!=0)
+            if(length(predictedid) > maxsize){
+                abegin = (abegin+aend)/2
+            }else if (length(predictedid) < minsize){
+                aend = (abegin+aend)/2
+            }else
+                break
+        }
+        
+        if(length(predictedid) <= maxsize){
+            modulescore = sum(W[predictedid,predictedid])
+            
+            write.table(as.character(idxname[predictedid]),file = paste(foldername,
+                    '/DenseModuleGeneID_',indicatename,'_',idx,'.txt',sep=''),
+                        quote = FALSE, row.names = FALSE, col.names = FALSE)
+            
+            write.table(GeneNames[predictedid],file = paste(foldername,'/',
+                        floor(modulescore),'-moduleid-',idx,'.txt',sep=''),
+                        quote = FALSE, row.names = FALSE, col.names = FALSE)
+            idx <- idx+1
+        }
+        else if(length(predictedid) > maxsize){
+            modulescoreW = W[predictedid,predictedid]
+            print(paste('Atom! with size',length(predictedid),sep=' '))
+            tmpstr = as.numeric(GeneNames[predictedid])-1
+            forTotalcompletegraph(tmpstr,modulescoreW,saveAtomfile)
+        }
+        W = W[-predictedid,-predictedid]
+        GeneNames = GeneNames[-predictedid]
+        z = z[-predictedid]
+        idxname = idxname[-predictedid]
+        N = length(GeneNames)
+        print(paste('Finishing module ',ii,sep=''))
+        
+        if(N < 3 | sum(W)==0)
+            break
+    }
 }
 
 #' Illustration of two networks comparison
@@ -233,9 +450,9 @@ WeightedModulePartitionDensity <- function(datExpr,foldername,indicatename,
 #' CuttingCriterion = 'Density' # could be Density or Modularity
 #' indicator1 = 'X'     # indicator for data profile 1
 #' indicator2 = 'Y'      # indicator for data profile 2
-#' intModules1 <- WeightedModulePartitionDensity(datExpr1,ResultFolder,
+#' intModules1 <- WeightedModulePartitionHierarchical(datExpr1,ResultFolder,
 #' indicator1,CuttingCriterion) 
-#' intModules2 <- WeightedModulePartitionDensity(datExpr2,ResultFolder,
+#' intModules2 <- WeightedModulePartitionHierarchical(datExpr2,ResultFolder,
 #' indicator2,CuttingCriterion) 
 #' JaccardMatrix <- comparemodulestwonets(ResultFolder,intModules1,intModules2,
 #' paste('/DenseModuleGene_',indicator1,sep=''),
@@ -267,7 +484,7 @@ comparemodulestwonets <- function(sourcehead,nm1,nm2,ind1,ind2){
 #'
 #' @param ResultFolder where to store results
 #' @param intModules how many modules in the background network
-#' @param speciesName identifier of current profile, served as a tag in name
+#' @param indicator identifier of current profile, served as a tag in name
 #' @param intconditionModules a numeric vector, each of them is the number 
 #' of modules in each condition-specific network. Or just single number
 #' @param conditionNames a character vector, each of them is the name 
@@ -282,7 +499,7 @@ comparemodulestwonets <- function(sourcehead,nm1,nm2,ind1,ind2){
 #' @return None
 #' 
 #' @author Dong Li, \email{dxl466@cs.bham.ac.uk}
-#' @seealso \code{\link{WeightedModulePartitionDensity}},
+#' @seealso \code{\link{WeightedModulePartitionHierarchical}},
 #' \code{\link{comparemodulestwonets}}
 #' @keywords module differential
 #' 
@@ -294,22 +511,22 @@ comparemodulestwonets <- function(sourcehead,nm1,nm2,ind1,ind2){
 #' indicator2 = 'Y'      # indicator for data profile 2
 #' specificTheta = 0.1 #threshold to define condition specific modules
 #' conservedTheta = 0.1#threshold to define conserved modules
-#' intModules1 <- WeightedModulePartitionDensity(datExpr1,ResultFolder,
+#' intModules1 <- WeightedModulePartitionHierarchical(datExpr1,ResultFolder,
 #' indicator1,CuttingCriterion) 
-#' intModules2 <- WeightedModulePartitionDensity(datExpr2,ResultFolder,
+#' intModules2 <- WeightedModulePartitionHierarchical(datExpr2,ResultFolder,
 #' indicator2,CuttingCriterion) 
 #' CompareAllNets(ResultFolder,intModules1,indicator1,intModules2,indicator2,
 #' specificTheta,conservedTheta)
 #' 
 #' @export
 #' 
-CompareAllNets <-function(ResultFolder,intModules,speciesName,
+CompareAllNets <- function(ResultFolder,intModules,indicator,
                           intconditionModules,conditionNames,specificTheta,
                           conservedTheta){
     for (i in 1:length(conditionNames)) {
         ArrayGroup1 <- comparemodulestwonets(ResultFolder,intModules,
-                    intconditionModules[i],paste('/DenseModuleGene_',
-                    speciesName,sep=''),paste('/DenseModuleGene_',
+                    intconditionModules[i],paste('/DenseModuleGeneID_',
+                        indicator,sep=''),paste('/DenseModuleGeneID_',
                     conditionNames[i],sep=''))
         dir.create(paste(ResultFolder,'/',conditionNames[i],sep=''), showWarnings = FALSE)
         fileprefix <- paste(ResultFolder,'/',conditionNames[i],'/',sep='')
@@ -320,7 +537,7 @@ CompareAllNets <-function(ResultFolder,intModules,speciesName,
                   '.png',sep=''))
         plot(1:intModules,rowSums(ArrayGroup1),xlim = c(0,(intModules + 1)),
              ylim = c(0,max(rowSums(ArrayGroup1)) + 0.1),
-             xlab="Module ID",ylab = 'RowSums of jaccard matrix', 
+             xlab="Module ID",ylab = 'RowSums of similarity matrix', 
              type = 'n',main="Overlapped ratio")
         lines(1:intModules, rowSums(ArrayGroup1), col = 'black', type = "b")
         abline(h = min(rowSums(ArrayGroup1)) + 0.1, col='red')
@@ -340,6 +557,165 @@ CompareAllNets <-function(ResultFolder,intModules,speciesName,
         write.table(conservedmoduleid,file = paste(fileprefix,
                     'conservedModuleid.txt',sep=''),
                     row.names = FALSE, col.names = FALSE)
+    }
+}
+
+#' Statistics of all conditions
+#' 
+#' Statistics of all conditions. To highlight conserved or condition-specific 
+#' by counting how frequent each module is lablelled as which, and then 
+#' visualize the frequency by bar plot. 
+#'
+#' @param ResultFolder where to store results
+#' @param intModules how many modules in the background network
+#' @param indicator identifier of current profile, served as a tag in name
+#' @param conditionNames a character vector, each of them is the name
+#' @param legendNames a character vector, each of them is the condition name 
+#' showing up in the frequency barplot 
+#' of condition. Or just single name
+#' @return None
+#' 
+#' @author Dong Li, \email{dxl466@cs.bham.ac.uk}
+#' @seealso \code{\link{WeightedModulePartitionHierarchical}},
+#' \code{\link{WeightedModulePartitionLouvain}},
+#' \code{\link{WeightedModulePartitionSpectral}},
+#' \code{\link{WeightedModulePartitionAmoutain}},
+#' \code{\link{CompareAllNets}}
+#' @keywords module differential Statistics
+#' 
+#' @import RColorBrewer
+#' 
+#' @export
+#' 
+ModuleFrequency <- function(ResultFolder,intModules, conditionNames, 
+                            legendNames, indicator){
+    Ncon <- length(conditionNames)
+    wide <- matrix (0,nrow = Ncon, ncol = intModules)
+    for (i in 1:Ncon) {
+        fileprefix <- paste(ResultFolder,'/',conditionNames[i],'/',sep='')
+        #tad <- read.table(paste(fileprefix,'sepcificModuleid.txt',sep=''),header = TRUE, sep = "")
+        tad <- as.numeric(readLines(paste(fileprefix,'sepcificModuleid.txt',sep='')))
+        #moduleid <-tad[,1]
+        wide[i,tad] <- 1
+    }
+    idx1 <- which(colSums(wide)!=0)
+    # sequential <- brewer.pal(length(conditionNames), "Greens")
+    # sequential <- brewer.pal(length(conditionNames), col=c('black', 'white', 'blue', 'red', 'yellow', 'purple', 'green'))
+    # sequential <- c('black', 'white', 'blue', 'red', 'yellow', 'purple', 'green')
+    
+    if (Ncon > 9){
+    qual_col_pals <- brewer.pal.info[brewer.pal.info$category == 'qual',]
+    col_vector <- unlist(mapply(brewer.pal, qual_col_pals$maxcolors, rownames(qual_col_pals)))
+    sequential <- sample(col_vector, Ncon)
+    } else
+        sequential <- brewer.pal(Ncon, "Set1")
+    
+    pdf(paste(ResultFolder,'/specificmembership.pdf',sep=''),width = 10, height = 5)
+    #  png('specificmembership.png',width = 1000, height = 500)
+    barplot(wide[,idx1],
+            names.arg = idx1,
+            cex.names = 0.7, # makes x-axis labels small enough to show all
+            col = sequential, # colors
+            xlab = "module id",
+            ylab = "if in condition specific network",
+            xlim = c(0,length(idx1)), # these two lines allow space for the legend
+            main = 'Frequency of condition specific module',
+            width = 0.75) # these two lines allow space for the legend
+    legend("topleft", 
+           legend = legendNames, #in order from top to bottom
+           fill = sequential, # 6:1 reorders so legend order matches graph
+           title = "conditions",cex = 0.75)
+    dev.off()
+    
+    for (ispec in 1:Ncon) {
+        idx1 <- intersect(which(colSums(wide)!=0), which(colSums(wide) <= ispec))
+        uniqueaffiliation <- vector('list',Ncon)
+        names (uniqueaffiliation) <- conditionNames
+        for (i in 1:length(idx1)) {
+            tmp <- which(wide[,idx1[i]] == 1)
+            for (j in 1:length(tmp)) {
+                uniqueaffiliation[[tmp[j]]] <- union(uniqueaffiliation[[tmp[j]]],idx1[i])
+            }
+        }
+        write(paste('If we allow at most ', ispec ,' share one condition\n',sep=''),
+              file = paste(ResultFolder,'/specificmembership.txt',sep=''),append=TRUE)
+        for (i in 1:Ncon) {
+            write(conditionNames[i],file = paste(ResultFolder,'/specificmembership.txt',sep=''),append=TRUE)
+            if(is.null(uniqueaffiliation[[i]])){
+                write('NULL',file = paste(ResultFolder,'/specificmembership.txt',sep=''),append = TRUE)
+            }else{
+                write(uniqueaffiliation[[i]],file = paste(ResultFolder,'/specificmembership.txt',sep=''),append = TRUE)
+            }
+            write('\n',file = paste(ResultFolder,'/specificmembership.txt',sep=''),append=TRUE)
+        }
+    }
+    
+    wide2 <- matrix (0,nrow = Ncon, ncol = intModules)
+    for (i in 1:length(conditionNames)) {
+        fileprefix <- paste(ResultFolder,'/',conditionNames[i],'/',sep='')
+        #tad <- read.table(paste(fileprefix,'conservedModuleid.txt',sep=''),header = TRUE, sep = "")
+        #moduleid <- tad[,1]
+        tad <- as.numeric(readLines(paste(fileprefix,'conservedModuleid.txt',sep='')))
+        wide2[i,tad] <- 1
+        #wide2[i,moduleid] <- 1
+    }
+    idx2 <- which(colSums(wide2)!=0)
+    
+    #sequential <- c('black', 'white', 'blue', 'red', 'yellow', 'purple', 'green')
+    #sequential <- brewer.pal(Ncon, "Set1")
+    #sequential <- sample(col_vector, Ncon)
+    pdf(paste(ResultFolder,'/conservedmembership.pdf',sep=''),width = 10, height = 5)
+    #  png('specificmembership.png',width = 1000, height = 500)
+    barplot(wide2[,idx2],
+            names.arg = idx2,
+            cex.names = 0.7, # makes x-axis labels small enough to show all
+            col = sequential, # colors
+            xlab = "module id",
+            ylab = "if in condition specific network",
+            xlim = c(0,length(idx2)), # these two lines allow space for the legend
+            main = 'Frequency of conserved module',
+            width = 0.75) # these two lines allow space for the legend
+    legend("topleft", 
+           legend =legendNames, #in order from top to bottom
+           fill = sequential, # 6:1 reorders so legend order matches graph
+           title = "conditions",cex = 0.75)
+           
+    dev.off()
+    
+    idx <- sort(union(idx1,idx2))
+    pdf(paste(ResultFolder,'/membership.pdf',sep=''),width = 10, height = 5)
+    plot(1:length(idx),xaxt = "n",yaxt = "n",
+         xlim = c(1,length(idx)),ylim = c(-max(colSums(wide2)),max(colSums(wide))),type = "n",
+         xlab='Module ID',ylab='Membership',main = 'Specification of conditon-specific and conserved module')
+    #axis(1, at = seq(1, intModules, by = 1), labels=1:intModules)
+    
+    bp <- barplot(wide[,idx],axes=FALSE,
+                  names.arg = idx,
+                  cex.names = 0.7, # makes x-axis labels small enough to show all
+                  col = sequential, # colors
+                  width = 0.75,
+                  add = TRUE) # these two lines allow space for the legend
+    barplot(-wide2[,idx],axes=FALSE,
+            col = sequential, # colors
+            width = 0.75,add = TRUE)
+    legend("bottomleft", 
+           legend = legendNames, #in order from top to bottom
+           fill = sequential, # 6:1 reorders so legend order matches graph
+           cex = 0.75,bty = "n")# without borders
+    text(length(idx)-1, 1, 'Conditon specific',cex = 0.75)
+    text(length(idx)-1, -1, 'Conserved',cex = 0.75)
+    dev.off()
+    
+    write.table(idx2,file = paste(ResultFolder,'/conservedmembership.txt',sep=''),
+                row.names = FALSE, col.names = FALSE)
+    dir.create(paste(ResultFolder,'/','interestedModules',sep=''))
+    for (i in idx1) {
+        file.copy(paste(ResultFolder,"/DenseModuleGene_",indicator,"_",i,".txt",sep=""), 
+                  paste(ResultFolder,'/','interestedModules',sep=''))
+    }
+    for (i in idx2) {
+        file.copy(paste(ResultFolder,"/DenseModuleGene_",indicator,"_",i,".txt",sep=""), 
+                  paste(ResultFolder,'/','interestedModules',sep=''))
     }
 }
 

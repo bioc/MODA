@@ -4,7 +4,7 @@
 \alias{CompareAllNets}
 \title{Illustration of network comparison}
 \usage{
-CompareAllNets(ResultFolder, intModules, speciesName, intconditionModules,
+CompareAllNets(ResultFolder, intModules, indicator, intconditionModules,
   conditionNames, specificTheta, conservedTheta)
 }
 \arguments{
@@ -12,7 +12,7 @@ CompareAllNets(ResultFolder, intModules, speciesName, intconditionModules,
 
 \item{intModules}{how many modules in the background network}
 
-\item{speciesName}{identifier of current profile, served as a tag in name}
+\item{indicator}{identifier of current profile, served as a tag in name}
 
 \item{intconditionModules}{a numeric vector, each of them is the number 
 of modules in each condition-specific network. Or just single number}
@@ -44,9 +44,9 @@ indicator1 = 'X'     # indicator for data profile 1
 indicator2 = 'Y'      # indicator for data profile 2
 specificTheta = 0.1 #threshold to define condition specific modules
 conservedTheta = 0.1#threshold to define conserved modules
-intModules1 <- WeightedModulePartitionDensity(datExpr1,ResultFolder,
+intModules1 <- WeightedModulePartitionHierarchical(datExpr1,ResultFolder,
 indicator1,CuttingCriterion) 
-intModules2 <- WeightedModulePartitionDensity(datExpr2,ResultFolder,
+intModules2 <- WeightedModulePartitionHierarchical(datExpr2,ResultFolder,
 indicator2,CuttingCriterion) 
 CompareAllNets(ResultFolder,intModules1,indicator1,intModules2,indicator2,
 specificTheta,conservedTheta)
@@ -56,7 +56,7 @@ specificTheta,conservedTheta)
 Dong Li, \email{dxl466@cs.bham.ac.uk}
 }
 \seealso{
-\code{\link{WeightedModulePartitionDensity}},
+\code{\link{WeightedModulePartitionHierarchical}},
 \code{\link{comparemodulestwonets}}
 }
 \keyword{differential}
